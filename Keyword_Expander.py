@@ -12,30 +12,25 @@ from typing import List, Dict, Set
 # Load environment variables
 load_dotenv()
 
+# Check for API key at startup
+SERP_API_KEY = os.getenv("SERP_API_KEY")
+
+if not SERP_API_KEY:
+    st.error("Please ensure SERP_API_KEY is set in your .env file")
+    st.stop()
+
 # Constants
-MAX_DEPTH = 3
+MAX_DEPTH = 2
 RATE_LIMIT_DELAY = 1  # Delay in seconds between API calls
 
 # Initialize session state
 if 'expanded_keywords' not in st.session_state:
     st.session_state.expanded_keywords = None
 
-def is_api_key_valid():
-    """Check if the API key is valid and not expired"""
-    return (
-        "serp_api_key" in st.session_state
-        and "api_key_expiry" in st.session_state
-        and st.session_state.api_key_expiry > time.time()
-    )
-
 def fetch_google_keywords(keyword: str, country: str) -> Dict[str, List[str]]:
     """Fetch keywords from Google"""
-    if not st.session_state.serp_api_key:
-        st.error("API key not found")
-        return {"related_keywords": [], "people_also_ask": [], "autocomplete": []}
-        
     params = {
-        "api_key": st.session_state.serp_api_key,
+        "api_key": SERP_API_KEY,
         "engine": "google",
         "q": keyword,
         "google_domain": "google.co.jp" if country == "jp" else "google.co.th",
@@ -83,26 +78,17 @@ def fetch_google_keywords(keyword: str, country: str) -> Dict[str, List[str]]:
             
         except Exception as e:
             st.write(f"Debug: Autocomplete fetch failed: {str(e)}")
-            # Continue without autocomplete results
             pass
         
     except Exception as e:
         st.error(f"Error fetching Google data for keyword '{keyword}': {str(e)}")
     
-    # Debug total keywords found
-    total_keywords = len(results["related_keywords"]) + len(results["people_also_ask"]) + len(results["autocomplete"])
-    st.write(f"Total keywords found for '{keyword}': {total_keywords}")
-    
     return results
 
 def fetch_yahoo_jp_keywords(keyword: str) -> Dict[str, List[str]]:
     """Fetch keywords from Yahoo Japan"""
-    if not st.session_state.serp_api_key:
-        st.error("API key not found")
-        return {"related_search": [], "related_questions": [], "related_topics": [], "trending_searches": []}
-        
     params = {
-        "api_key": st.session_state.serp_api_key,  # Use session state API key
+        "api_key": SERP_API_KEY,
         "engine": "yahoo_jp",
         "q": keyword,
     }
@@ -118,25 +104,18 @@ def fetch_yahoo_jp_keywords(keyword: str) -> Dict[str, List[str]]:
         search = GoogleSearch(params)
         search_results = search.get_dict()
         
-        # Debug information
-        st.write(f"Yahoo JP results for {keyword}")
-        
         # Extract different types of related content
         if 'related_searches' in search_results:
             results["related_search"] = [item["query"] for item in search_results["related_searches"]]
-            st.write(f"Google: Found {len(results['related_search'])} related searches")
             
         if 'related_questions' in search_results:
             results["related_questions"] = [item["question"] for item in search_results["related_questions"]]
-            st.write(f"Google: Found {len(results['related_questions'])} related questions")
             
         if 'related_topics' in search_results:
             results["related_topics"] = [item["topic"] for item in search_results["related_topics"]]
-            st.write(f"Google: Found {len(results['related_topics'])} related topics")
             
         if 'trending_searches' in search_results:
             results["trending_searches"] = [item["query"] for item in search_results["trending_searches"]]
-            st.write(f"Google: Found {len(results['trending_searches'])} trending searches")
         
     except Exception as e:
         st.error(f"Error fetching Yahoo Japan data for keyword '{keyword}': {str(e)}")
@@ -178,27 +157,6 @@ def expand_keywords(seed_keywords: List[str], depth: int, country: str, search_e
 def main():
     st.title("Keyword Expander for Thai and Japanese Markets")
     
-    # API Key Management in sidebar
-    with st.sidebar:
-        st.header("API Key Configuration")
-        if not is_api_key_valid():
-            api_key = st.text_input("Enter your SERP API Key", type="password")
-            if st.button("Save API Key"):
-                st.session_state.serp_api_key = api_key
-                st.session_state.api_key_expiry = time.time() + 12 * 3600  # 12 hours
-                st.success("API Key saved for 12 hours!")
-                st.rerun()  # Changed from experimental_rerun
-        else:
-            st.success("API Key is valid")
-            if st.button("Clear API Key"):
-                del st.session_state.serp_api_key
-                del st.session_state.api_key_expiry
-                st.rerun()  # Changed from experimental_rerun
-    
-    if not is_api_key_valid():
-        st.warning("Please enter your SERP API Key in the sidebar to continue.")
-        return
-
     # Market Selection
     country = st.radio("Select Market", ["Thailand", "Japan"])
     country_code = "jp" if country == "Japan" else "th"
