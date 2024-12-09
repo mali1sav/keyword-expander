@@ -8,6 +8,7 @@ from typing import List, Dict, Set
 import numpy as np
 from openai import OpenAI
 from sklearn.manifold import TSNE
+from sklearn.cluster import DBSCAN
 import plotly.graph_objects as go
 from sklearn.neighbors import NearestNeighbors
 
@@ -178,137 +179,96 @@ def create_visualization(texts):
     
     with st.spinner("Getting embeddings..."):
         embeddings = []
-        processed_texts = texts.copy()  # Use texts as is, no processing needed
+        processed_texts = texts.copy()
         
         for text in processed_texts:
             embedding = get_embedding(text)
             embeddings.append(embedding)
     
-    # Convert embeddings to numpy array
     embeddings_array = np.array(embeddings)
     
-    with st.spinner("Reducing dimensions..."):
+    with st.spinner("Reducing dimensions and clustering..."):
         # Reduce dimensions using t-SNE
         tsne = TSNE(n_components=2, random_state=42)
         embeddings_2d = tsne.fit_transform(embeddings_array)
-    
-    # Calculate similarity scores based on distances to nearest neighbors
-    nbrs = NearestNeighbors(n_neighbors=min(3, len(processed_texts))).fit(embeddings_array)
-    distances, _ = nbrs.kneighbors(embeddings_array)
-    similarity_scores = 1 / (1 + np.mean(distances, axis=1))
-    
-    # Create DataFrame for plotting
-    df = pd.DataFrame({
-        'x': embeddings_2d[:, 0],
-        'y': embeddings_2d[:, 1],
-        'text': processed_texts,
-        'short_text': [text[:30] + "..." if len(text) > 30 else text for text in processed_texts]
-    })
-    
-    # Create custom hover text
-    hover_text = [f"Keyword: {text}" for text in processed_texts]
-    
-    # Create figure with custom layout
-    fig = go.Figure()
-    
-    # Add scatter points
-    fig.add_trace(go.Scatter(
-        x=df['x'],
-        y=df['y'],
-        mode='markers+text',
-        text=df['short_text'],
-        hovertext=hover_text,
-        hoverinfo='text',
-        textposition='top center',
-        marker=dict(
-            size=10,
-            color=similarity_scores,
-            colorscale='Viridis',
-            opacity=0.7,
-            showscale=True,
-            colorbar=dict(
-                title='Similarity Score',
-                tickformat='.2f'
-            )
-        ),
-        textfont=dict(size=10)
-    ))
-    
-    # Update layout for better readability and full screen
-    fig.update_layout(
-        title={
-            'text': 'Keyword Similarity Visualization',
-            'y':0.95,
-            'x':0.5,
-            'xanchor': 'center',
-            'yanchor': 'top',
-            'font': dict(size=24)
-        },
-        xaxis=dict(
-            title='t-SNE dimension 1',
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(211,211,211,0.3)'
-        ),
-        yaxis=dict(
-            title='t-SNE dimension 2',
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='rgba(211,211,211,0.3)'
-        ),
-        plot_bgcolor='white',
-        width=None,  # Allow full width
-        height=900,  # Increased height
-        showlegend=False,
-        hovermode='closest'
-    )
-    
-    # Add zoom and pan buttons
-    fig.update_layout(
-        updatemenus=[
-            dict(
-                type="buttons",
-                showactive=False,
-                buttons=[
-                    dict(label="Reset View",
-                         method="relayout",
-                         args=[{"xaxis.range": [None, None],
-                               "yaxis.range": [None, None]}]),
-                ]
-            )
-        ]
-    )
-    
-    # Show the plot with full width
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Add search functionality
-    search_term = st.text_input("Search for specific keywords:")
-    if search_term:
-        filtered_df = df[df['text'].str.contains(search_term, case=False)]
-        if not filtered_df.empty:
-            st.write("Found matches:")
-            st.dataframe(filtered_df[['text']])
-        else:
-            st.write("No matches found.")
-    
-    # Add visualization instructions
-    st.markdown("""
-    ### Key Things to Look for in the Visualization:
-    
-    1. **Clusters**: Groups of points close together represent semantically related keywords, regardless of color.
-    
-    2. **Colors**: The color intensity indicates how many similar neighbors a keyword has:
-       - Brighter colors = Many similar neighbors (high similarity score)
-       - Darker colors = Fewer similar neighbors (lower similarity score)
-    
-    3. **Distance**: The closer two points are to each other, the more similar their content, regardless of color.
-    
-    4. **Navigation**:
-       - Hover over points to see full keyword text
-       - Use the search box above to find specific keywords
-       - Use the Reset View button or double-click to reset the zoom
-    """)
+        
+        # Perform DBSCAN clustering
+        clustering = DBSCAN(eps=0.5, min_samples=2).fit(embeddings_2d)
+        labels = clustering.labels_
+        
+        # Create DataFrame with texts and their cluster labels
+        df = pd.DataFrame({
+            'text': processed_texts,
+            'cluster': labels,
+            'x': embeddings_2d[:, 0],
+            'y': embeddings_2d[:, 1],
+        })
+        
+        # Display clustered keywords in an expander
+        with st.expander("📑 Keyword Groups (Click to Copy)", expanded=True):
+            st.markdown("*Groups are based on semantic similarity*")
+            
+            # Create columns for better organization
+            cols = st.columns(2)
+            unique_clusters = sorted(df['cluster'].unique())
+            
+            for idx, cluster in enumerate(unique_clusters):
+                col_idx = idx % 2
+                with cols[col_idx]:
+                    if cluster == -1:
+                        group_name = "📎 Miscellaneous Keywords"
+                    else:
+                        group_name = f"📑 Group {cluster + 1}"
+                    
+                    keywords = df[df['cluster'] == cluster]['text'].tolist()
+                    keywords_text = "\n".join(keywords)
+                    
+                    st.text_area(
+                        group_name,
+                        keywords_text,
+                        height=150,
+                        key=f"cluster_{cluster}"
+                    )
+                    st.markdown(f"*{len(keywords)} keywords*")
+        
+        # Calculate similarity scores for the visualization
+        nbrs = NearestNeighbors(n_neighbors=min(3, len(processed_texts))).fit(embeddings_array)
+        distances, _ = nbrs.kneighbors(embeddings_array)
+        similarity_scores = 1 / (1 + np.mean(distances, axis=1))
+        
+        # Create the scatter plot
+        fig = go.Figure()
+        
+        # Add points colored by cluster
+        for cluster in unique_clusters:
+            mask = df['cluster'] == cluster
+            cluster_name = 'Miscellaneous' if cluster == -1 else f'Group {cluster + 1}'
+            
+            fig.add_trace(go.Scatter(
+                x=df[mask]['x'],
+                y=df[mask]['y'],
+                mode='markers+text',
+                name=cluster_name,
+                text=df[mask]['text'],
+                textposition="top center",
+                marker=dict(
+                    size=10,
+                    opacity=0.7
+                ),
+                hovertemplate="<b>%{text}</b><br>" +
+                            "<extra></extra>"
+            ))
+        
+        fig.update_layout(
+            title="Keyword Similarity Map",
+            xaxis_title="t-SNE dimension 1",
+            yaxis_title="t-SNE dimension 2",
+            showlegend=True,
+            width=800,
+            height=600
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
 
 def main():
     st.title("Keyword Expander for Thai and Japanese Markets")
