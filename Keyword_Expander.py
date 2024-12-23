@@ -1,6 +1,5 @@
 # thai_keyword_research_openrouter.py
 
-# Import necessary libraries
 import os
 import time
 import pandas as pd
@@ -26,6 +25,24 @@ RATE_LIMIT_DELAY = 1  # Delay in seconds between API calls
 # Initialize session state
 if 'expanded_keywords' not in st.session_state:
     st.session_state.expanded_keywords = None
+
+##############################################################################
+# Added function to parse search volume that may include 'K' (e.g., 1.6K -> 1600)
+##############################################################################
+def parse_volume_string(volume_str: str) -> int:
+    volume_str = volume_str.strip().lower().replace(',', '')
+    if 'k' in volume_str:
+        # e.g., '1.6k' -> numeric_part = '1.6' -> numeric_value = 1.6 -> 1600
+        numeric_part = volume_str.replace('k', '')
+        return int(float(numeric_part) * 1000)
+    else:
+        # If it's just a plain number, just parse it
+        # e.g., '100' -> 100
+        # If it's empty or invalid, default to 0
+        try:
+            return int(float(volume_str))
+        except ValueError:
+            return 0
 
 def fetch_google_keywords(keyword: str, country: str) -> Dict[str, List[str]]:
     """Fetch keywords from Google"""
@@ -170,12 +187,12 @@ def main():
             default=["Google"]
         )
     
-    # Input for seed keywords
-    seed_keywords = st.text_area("Enter seed keywords (one per line):", height=150)
+    st.write("**Paste each keyword on a new line.** Optionally, you can include a search volume beside it (e.g., `keyword\\t1.6K`).")
+    seed_keywords_raw = st.text_area("Enter seed keywords:", height=150)
     depth = st.slider("Select expansion depth:", min_value=1, max_value=MAX_DEPTH, value=2)
-    
+
     if st.button("Expand Keywords"):
-        if not seed_keywords:
+        if not seed_keywords_raw:
             st.warning("Please enter at least one seed keyword.")
             return
         
@@ -183,7 +200,37 @@ def main():
             st.warning("Please select at least one search engine.")
             return
         
-        seed_keywords_list = [kw.strip() for kw in seed_keywords.split("\n") if kw.strip()]
+        # Parse user input
+        # Format accepted: "keyword [tab or spaces] volume"
+        # e.g.:
+        # leverage คือ    1.6K
+        # leverage ratio คือ  200
+        seed_keywords_list = []
+        for line in seed_keywords_raw.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Check if there's a tab or multiple spaces separating the keyword and volume
+            parts = line.split()
+            # We guess the last part might be volume
+            # e.g. ["leverage", "คือ", "1.6K"]
+            # We'll try to parse the last part as volume, if fail, treat entire as a keyword
+            if len(parts) > 1:
+                possible_volume = parts[-1]
+                # Join everything before the last part as the "keyword"
+                possible_keyword = " ".join(parts[:-1])
+                vol_parsed = parse_volume_string(possible_volume)
+                if vol_parsed > 0:
+                    # We consider the last part to be a valid volume
+                    seed_keywords_list.append(possible_keyword)
+                else:
+                    # The last part wasn't volume, so treat entire line as just a keyword
+                    seed_keywords_list.append(line)
+                # We won't store volumes in this app, but you can handle them if needed
+            else:
+                # Only one part, treat as a pure keyword
+                seed_keywords_list.append(line)
         
         with st.spinner("Expanding keywords..."):
             st.session_state.expanded_keywords = expand_keywords(
