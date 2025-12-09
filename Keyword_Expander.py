@@ -316,8 +316,8 @@ def main():
     
     # Input for seed keywords
     seed_keywords = st.text_area(
-        "🌱 Enter seed keywords (one per line):",
-        height=150,
+        "🌱 Enter seed keywords (one per line) - please don't exceed 3 keywords:",
+        height=100,
         placeholder="Enter your seed keywords here...\nExample:\nbest coffee\ncoffee shop\nเครื่องชงกาแฟ"
     )
     
